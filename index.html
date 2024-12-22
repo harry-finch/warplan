@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Visualisation des adresses sur OpenStreetMap</title>
+        <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet" />
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+            integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+            crossorigin=""
+        />
+        <style>
+            body {
+                font-family: "Roboto", sans-serif;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                background-color: #f5f5f5;
+                color: #333;
+            }
+            #address-container {
+                width: 60%;
+                margin-bottom: 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            #controls {
+                margin: 20px;
+                width: 60%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+            #controls input {
+                width: calc(100% - 110px);
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 16px;
+            }
+            #map {
+                width: 60%;
+                height: 500px;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                margin-top: 20px;
+                padding: 20px;
+            }
+            .material-icons {
+                vertical-align: middle;
+                margin-right: 8px;
+            }
+            .address-row {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 10px;
+            }
+            #add-address {
+                background-color: lightgreen;
+                border: 1px solid #ccc;
+                color: #666;
+                cursor: pointer;
+                font-size: 14px;
+                width: 30px;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                transition:
+                    background-color 0.2s,
+                    color 0.2s;
+            }
+            #add-address:hover {
+                background-color: #f5f5f5;
+                color: #333;
+            }
+            .delete-address {
+                background-color: lightcoral;
+                border: 1px solid #ccc;
+                color: white;
+                cursor: pointer;
+                font-size: 14px;
+                width: 30px;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                transition:
+                    background-color 0.2s,
+                    color 0.2s;
+            }
+            .delete-address:hover {
+                background-color: #f5f5f5;
+                color: #333;
+            }
+            #show-map,
+            #reset-map {
+                width: 60%;
+                margin: 10px;
+                padding: 10px 20px;
+                font-size: 0.8em;
+                color: white;
+                background-color: #6200ea;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                text-transform: uppercase;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                transition: background-color 0.3s;
+            }
+            #show-map:hover,
+            #reset-map:hover {
+                background-color: #3700b3;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="controls">
+            <div id="address-container">
+                <div class="address-row">
+                    <input type="text" class="address" placeholder="Entrez une adresse" />
+                    <button id="add-address">+</button>
+                </div>
+            </div>
+
+            <button id="show-map"><span class="material-icons">map</span>Afficher sur la carte</button>
+            <button id="reset-map"><span class="material-icons">refresh</span>Réinitialiser la carte</button>
+        </div>
+        <div id="map"></div>
+
+        <script
+            src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""
+        ></script>
+        <script>
+            let map;
+            const markers = [];
+            const polylines = [];
+
+            function initMap() {
+                if (typeof L === "undefined") {
+                    alert("La bibliothèque Leaflet n'est pas correctement chargée. Vérifiez votre connexion ou le lien CDN.");
+                    return;
+                }
+
+                map = L.map("map").setView([48.8566, 2.3522], 5); // Centré sur Paris par défaut
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                    maxZoom: 19,
+                    attribution: "© OpenStreetMap contributors",
+                }).addTo(map);
+            }
+
+            function updateDeleteButtonsVisibility() {
+                const rows = document.querySelectorAll(".address-row");
+                rows.forEach((row) => {
+                    const deleteButton = row.querySelector(".delete-address");
+                    if (deleteButton) {
+                        deleteButton.style.display = rows.length > 1 ? "flex" : "none";
+                    }
+                });
+            }
+
+            async function updateMap() {
+                const addresses = Array.from(document.querySelectorAll(".address")).map((input) => input.value);
+
+                markers.forEach((marker) => map.removeLayer(marker)); // Efface les anciens marqueurs
+                markers.length = 0;
+
+                let coordinates = [];
+
+                for (const address of addresses) {
+                    if (address.trim() !== "") {
+                        try {
+                            // Étape 1 : Rechercher avec Nominatim
+                            const nominatimResponse = await fetch(
+                                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`,
+                            );
+                            const results = await nominatimResponse.json();
+
+                            if (results.length > 0) {
+                                const result = results[0];
+                                const { osm_id, osm_type, addresstype, display_name } = result;
+
+                                console.log(result);
+
+                                // Vérifier si le type est une ville, un village, etc.
+                                if (["city", "town", "village", "suburb"].includes(addresstype)) {
+                                    console.log(`L'adresse "${address}" a été détectée comme une ville.`);
+                                    coordinates.push(...(await getCityBoundary(osm_id, osm_type, display_name)));
+                                } else {
+                                    const { lat, lon, display_name } = results[0];
+                                    const marker = L.marker([lat, lon]).addTo(map).bindPopup(display_name);
+                                    markers.push(marker);
+
+                                    coordinates.push({ lat: lat, lon: lon });
+                                }
+                            } else {
+                                console.error("Aucune correspondance trouvée pour l'adresse.");
+                            }
+                        } catch (error) {
+                            console.error("Erreur lors de la détection et du traitement de l'adresse :", error);
+                        }
+                    }
+                }
+
+                if (coordinates.length > 0) {
+                    const margin = 0.02;
+
+                    map.fitBounds([
+                        [
+                            Math.min(...coordinates.map((o) => o.lat)) - margin,
+                            Math.min(...coordinates.map((o) => o.lon)) - margin,
+                        ],
+                        [
+                            Math.max(...coordinates.map((o) => o.lat)) + margin,
+                            Math.max(...coordinates.map((o) => o.lon)) + margin,
+                        ],
+                    ]);
+                }
+            }
+
+            async function getCityBoundary(osm_id, osm_type, display_name) {
+                let allCoordinates = [];
+
+                try {
+                    // Étape 2 : Conversion de osm_type pour Overpass (relation -> R, way -> W, node -> N)
+                    const overpassType = osm_type === "relation" ? "R" : osm_type === "way" ? "W" : "N";
+
+                    // Requête Overpass pour récupérer les limites
+                    const overpassQuery = `
+                        [out:json];
+                        ${osm_type}(${osm_id});
+                        out geom;
+                    `;
+
+                    const overpassResponse = await fetch("https://overpass-api.de/api/interpreter", {
+                        method: "POST",
+                        body: overpassQuery,
+                    });
+                    const overpassData = await overpassResponse.json();
+
+                    if (overpassData.elements && overpassData.elements.length > 0) {
+                        overpassData.elements.forEach((element) => {
+                            if (element.members) {
+                                element.members.forEach((member) => {
+                                    if (member.geometry) {
+                                        // Extraire les coordonnées des géométries
+                                        const coordinates = member.geometry.map((point) => [point.lat, point.lon]);
+                                        coordinates.forEach((coordinate) => {
+                                            allCoordinates.push({ lat: coordinate[0], lon: coordinate[1] });
+                                        });
+
+                                        // Dessiner le polygone sur la carte
+                                        const polyline = L.polyline(coordinates, {
+                                            color: "blue",
+                                            weight: 2,
+                                            fillOpacity: 0.4,
+                                        }).addTo(map);
+
+                                        polylines.push(polyline);
+                                    }
+                                });
+                            }
+                        });
+                    } else {
+                        console.error("Aucune limite géographique trouvée pour cette ville.");
+                    }
+                } catch (error) {
+                    console.error("Erreur lors de la récupération des limites de la ville :", error);
+                }
+
+                return allCoordinates;
+            }
+
+            function createAddressRow() {
+                const container = document.getElementById("address-container");
+
+                // Supprime l'ancien bouton "Ajouter"
+                const oldAddButton = container.querySelector("#add-address");
+                if (oldAddButton) {
+                    oldAddButton.remove();
+                }
+
+                const row = document.createElement("div");
+                row.className = "address-row";
+
+                const input = document.createElement("input");
+                input.type = "text";
+                input.className = "address";
+                input.placeholder = "Entrez une adresse";
+
+                const deleteButton = document.createElement("button");
+                deleteButton.className = "delete-address";
+                deleteButton.title = "Supprimer cette adresse";
+                deleteButton.innerHTML = "&times;";
+
+                deleteButton.addEventListener("click", () => {
+                    container.removeChild(row);
+                    updateDeleteButtonsVisibility();
+
+                    // Ajoute le bouton "Ajouter" au dernier champ existant
+                    const lastRow = container.querySelector(".address-row:last-child");
+                    if (lastRow) {
+                        appendAddButtonToRow(lastRow);
+                    }
+
+                    // Met à jour la carte
+                    updateMap();
+                });
+
+                row.appendChild(input);
+                row.appendChild(deleteButton);
+                container.appendChild(row);
+
+                // Ajoute le bouton "Ajouter" sur la nouvelle ligne
+                appendAddButtonToRow(row);
+
+                updateDeleteButtonsVisibility();
+            }
+
+            function appendAddButtonToRow(row) {
+                const container = document.getElementById("address-container");
+                const existingAddButton = container.querySelector("#add-address");
+                if (existingAddButton) {
+                    existingAddButton.remove();
+                }
+
+                const newAddButton = document.createElement("button");
+                newAddButton.setAttribute("id", "add-address");
+                newAddButton.title = "Ajouter une adresse";
+                newAddButton.innerHTML = "+";
+
+                newAddButton.addEventListener("click", createAddressRow);
+
+                row.appendChild(newAddButton);
+            }
+
+            document.getElementById("add-address").addEventListener("click", () => {
+                createAddressRow();
+            });
+
+            document.getElementById("show-map").addEventListener("click", async () => {
+                if (!map) {
+                    alert("La carte n'est pas initialisée. Vérifiez que Leaflet est bien chargé.");
+                    return;
+                }
+
+                await updateMap();
+            });
+
+            document.getElementById("reset-map").addEventListener("click", () => {
+                markers.forEach((marker) => map.removeLayer(marker)); // Efface les anciens marqueurs
+                markers.length = 0;
+
+                polylines.forEach((polyline) => map.removeLayer(polyline)); // Efface les anciens marqueurs
+                polylines.length = 0;
+
+                map.setView([48.8566, 2.3522], 5); // Réinitialise la vue sur Paris
+            });
+
+            initMap();
+            updateDeleteButtonsVisibility();
+        </script>
+    </body>
+</html>
